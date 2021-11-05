@@ -7,7 +7,8 @@ Just a repository convenient for reviewing and retrieval practice.
 ### The architecture of this repository(Hierarchy Descending Order)
 
 1. folders for all relative chapters
-2. explanation file(s), source codes for implementations and tests.
+2. folders named after the dates containing all comprehended contents on that day
+3. explanation files, source files for implementations and tests.
 
 ### Retrieval Practice Method
 
