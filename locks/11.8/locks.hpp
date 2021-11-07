@@ -3,6 +3,7 @@
 
 #include "lock_traits.hpp"
 #include <atomic>
+#include <memory>
 
 template <class Mutex,
         typename = std::enable_if_t<std::is_same_v<lock_traits<Mutex>::is_lock_type, std::true_type>, void>>
@@ -97,32 +98,31 @@ class CLHLock {
 private:
     std::atomic<bool*> tail{};
     static thread_local bool *myPred;
-    static thread_local bool *myNode;
+    static thread_local std::unique_ptr<bool> myNode{nullptr};
     friend class lock_guard<CLHLock, void>;
 
 public:
     CLHLock() {
         tail = new bool{true};
-        myPred = myNode = nullptr;
+        myPred = nullptr;
     }
     ~CLHLock() {
         if (tail != nullptr)
             delete tail;
-        if (myNode != nullptr)
-            delete myNode;
     }
 
 private:
     void lock() {
-        if (nullptr == myNode)
-            myNode = new bool{false};
-        myPred = std::atomic_exchange(&tail, myNode);
+        if (nullptr == myNode.get())
+            myNode.reset(new bool{false});
+        myPred = std::atomic_exchange(&tail, myNode.get());
         while (!*myPred) {}
         *myPred = false;
     }
     void unlock() {
         *myNode = true;
-        myNode = myPred;
+        myNode.reset(myNode);
+        myNode = nullptr;
     }
 };
 
@@ -133,12 +133,14 @@ private:
         struct node *next;
     } Node;
     std::atomic<Node*> tail{};
-    static thread_local Node *myNode;
+    static thread_local Node myNode{};
     friend class lock_guard<MCSLock, void>;
 
 public:
     MCSLock() {
         tail = nullptr;
+        myNode.lock = false;
+        myNode.next = nullptr;
     }
     ~MCSLock() {
         if (tail != nullptr)
@@ -147,21 +149,21 @@ public:
 
 private:
     void lock() {
-        Node *pred = std::atomic_exchange(&tail, myNode);
+        Node *pred = std::atomic_exchange(&tail, &myNode);
         if (nullptr != pred) {
-            pred->next = myNode;
-            while (!myNode->lock) {}
-            myNode->lock = false;
+            pred->next = &myNode;
+            while (!myNode.lock) {}
+            myNode.lock = false;
         }
     }
     void unlock() {
-        if (nullptr == myNode->next) {
-            if (std::atomic_compare_exchange_weak_explicit(&tail, myNode, nullptr))
+        if (nullptr == myNode.next) {
+            if (std::atomic_compare_exchange_weak_explicit(&tail, &myNode, nullptr))
                 return;
-            while (nullptr == myNode->next) {}
+            while (nullptr == myNode.next) {}
         }
-        myNode->next->lock = true;
-        myNode->next = nullptr;
+        myNode.next->lock = true;
+        myNode.next = nullptr;
     }
 };
 
