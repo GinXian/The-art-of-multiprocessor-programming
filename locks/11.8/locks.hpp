@@ -121,8 +121,8 @@ private:
     }
     void unlock() {
         *myNode = true;
-        myNode.reset(myNode);
-        myNode = nullptr;
+        myNode.reset(myPred);
+        myPred = nullptr;
     }
 };
 
