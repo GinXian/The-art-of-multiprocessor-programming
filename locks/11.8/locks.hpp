@@ -31,7 +31,7 @@ public:
 
 private:
     void lock() {
-        while (std::atomic_compare_exchange_weak_explicit(&tail, true, false)) {}
+        while (std::atomic_compare_exchange_weak_explicit(&tail, true, false, std::memory_order_relaxed)) {}
     }
     void unlock() {
         lock = true;
@@ -52,7 +52,7 @@ private:
     void lock() {
         while (true) {
             while (!lock) {}
-            if (std::atomic_compare_exchange_weak_explicit(&tail, true, false))
+            if (std::atomic_compare_exchange_weak_explicit(&lock, true, false, std::memory_order_relaxed))
                 return;
         }
     }
@@ -61,7 +61,7 @@ private:
 class ALock {
 private:
     int capacity;
-    bool *queue;
+    volatile bool *queue;
     std::atomic<int> tail{};
     static thread_local int mySlotIndex;
     friend class lock_guard<ALock, void>;
@@ -70,7 +70,7 @@ public:
     ALock(ALock& other) = delete;
     ALock& operator=(ALock&) = delete;
     explicit ALock(int capacity = 10) : capacity(capacity) {
-        queue = new bool[capacity]{false};
+        queue = new volatile bool[capacity]{false};
         tail = 0;
         queue[0] = true;
         mySlotIndex = -1;
@@ -82,7 +82,7 @@ public:
 
 private:
     void lock() {
-        mySlotIndex = std::atomic_fetch_add(&tail, 1) % capacity;
+        mySlotIndex = std::atomic_fetch_add_explicit(&tail, 1, std::memory_order_relaxed) % capacity;
         while (!queue[mySlotIndex]) {}
         queue[mySlotIndex] = false;
     }
@@ -96,9 +96,9 @@ private:
 
 class CLHLock {
 private:
-    std::atomic<bool*> tail{};
-    static thread_local bool *myPred;
-    static thread_local std::unique_ptr<bool> myNode{nullptr};
+    std::atomic<volatile bool*> tail{};
+    static thread_local volatile bool *myPred;
+    static thread_local std::unique_ptr<volatile bool> myNode{nullptr};
     friend class lock_guard<CLHLock, void>;
 
 public:
@@ -115,7 +115,7 @@ private:
     void lock() {
         if (nullptr == myNode.get())
             myNode.reset(new bool{false});
-        myPred = std::atomic_exchange(&tail, myNode.get());
+        myPred = std::atomic_exchange_explicit(&tail, myNode.get(), std::memory_order_relaxed);
         while (!*myPred) {}
         *myPred = false;
     }
@@ -132,8 +132,8 @@ private:
         bool lock;
         struct node *next;
     } Node;
-    std::atomic<Node*> tail{};
-    static thread_local Node myNode{};
+    std::atomic<volatile Node*> tail{};
+    static thread_local volatile Node myNode{};
     friend class lock_guard<MCSLock, void>;
 
 public:
@@ -149,7 +149,7 @@ public:
 
 private:
     void lock() {
-        Node *pred = std::atomic_exchange(&tail, &myNode);
+        Node *pred = std::atomic_exchange_explicit(&tail, &myNode, std::memory_order_relaxed);
         if (nullptr != pred) {
             pred->next = &myNode;
             while (!myNode.lock) {}
@@ -158,7 +158,9 @@ private:
     }
     void unlock() {
         if (nullptr == myNode.next) {
-            if (std::atomic_compare_exchange_weak_explicit(&tail, &myNode, nullptr))
+            Node *tmp = &myNode;
+            // atomic_compare_exchange will update the expected value if the load failed.
+            if (std::atomic_compare_exchange_weak_explicit(&tail, &tmp, nullptr, std::memory_order_relaxed))
                 return;
             while (nullptr == myNode.next) {}
         }
