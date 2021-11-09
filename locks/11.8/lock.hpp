@@ -104,6 +104,10 @@ namespace multicore {
         CLHLock() {
             tail = new volatile bool{true};
         }
+        ~CLHLock() {
+            if (tail != nullptr)
+                delete tail;
+        }
 
     private:
         void lock() {
@@ -128,6 +132,13 @@ namespace multicore {
         std::atomic<volatile Node*> tail{nullptr};
         static thread_local volatile Node myNode{false, nullptr};
         friend class lock_guard<MCSLock, void>;
+
+    public:
+        MCSLock() = default;
+        ~MCSLock() {
+            if (tail != nullptr)
+                delete tail;
+        }
 
     private:
         void lock() {
